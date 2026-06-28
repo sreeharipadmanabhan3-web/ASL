@@ -1,0 +1,12 @@
+node_modules
+dist
+*.log
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.db
+.env
+.env.local
+*.md

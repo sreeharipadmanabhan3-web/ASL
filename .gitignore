@@ -1,0 +1,32 @@
+# Dependency directories
+node_modules/
+
+# Production build outputs
+dist/
+dist-ssr/
+*.local
+
+# Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Databases
+backend/instance/
+*.db
+*.sqlite3
+
+# IDE / System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Repomix outputs
+repomix-output.xml
