@@ -36,20 +36,20 @@ const TOKEN_KEY = 'asl_auth_token';
 const USER_KEY = 'asl_user';
 
 export const getToken = (): string | null => {
-  return localStorage.getItem(TOKEN_KEY);
+  return sessionStorage.getItem(TOKEN_KEY);
 };
 
 export const setToken = (token: string): void => {
-  localStorage.setItem(TOKEN_KEY, token);
+  sessionStorage.setItem(TOKEN_KEY, token);
 };
 
 export const removeToken = (): void => {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(USER_KEY);
 };
 
 export const getStoredUser = (): User | null => {
-  const userStr = localStorage.getItem(USER_KEY);
+  const userStr = sessionStorage.getItem(USER_KEY);
   if (userStr) {
     try {
       return JSON.parse(userStr);
@@ -61,7 +61,7 @@ export const getStoredUser = (): User | null => {
 };
 
 export const setStoredUser = (user: User): void => {
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
 };
 
 // API request helper

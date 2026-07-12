@@ -42,7 +42,7 @@ export function VocabularyPanel({ onClose, vocabulary }: VocabularyPanelProps) {
           {displayVocab.map((word) => (
             <span
               key={word}
-              className="px-2.5 py-1.5 bg-white/[0.02] border border-white/[0.05] rounded-lg text-white/50 text-[11px] font-medium tracking-wide hover:text-emerald-400 hover:border-emerald-500/25 hover:bg-emerald-500/5 transition-all duration-200 hover:scale-105 cursor-default"
+              className="px-2.5 py-1.5 bg-white/[0.02] border border-white/[0.05] rounded-lg text-white/50 text-[11px] font-medium tracking-wide hover:text-blue-400 hover:border-blue-500/25 hover:bg-blue-500/5 transition-all duration-200 hover:scale-105 cursor-default"
             >
               {word}
             </span>

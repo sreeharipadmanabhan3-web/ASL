@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, RefObject, useEffect } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import { Prediction, MAX_FRAMES } from '../types';
+import { audioEffects } from '../utils/audioEffects';
 
 interface SmoothedPoint {
   x: number;
@@ -12,6 +13,12 @@ interface UseHandTrackingOptions {
   onPredict?: (landmarks: number[][]) => Promise<Prediction[]>;
   onRegisterWord?: (word: string) => void;
   isModelLoaded?: boolean;
+  backendDelegate?: 'GPU' | 'CPU';
+  trackingFps?: number;
+  onDwellDelete?: () => void;
+  onDwellClear?: () => void;
+  onDwellSend?: () => void;
+  onDwellSpace?: () => void;
 }
 
 export type TrackingStatus = 'idle' | 'starting' | 'tracking' | 'error';
@@ -30,9 +37,12 @@ interface UseHandTrackingReturn {
   devices: MediaDeviceInfo[];
   selectedDeviceId: string;
   setSelectedDeviceId: (id: string) => void;
-  resolution: '480p' | '720p' | '1080p';
-  changeResolution: (res: '480p' | '720p' | '1080p') => Promise<void>;
+  resolution: '360p' | '480p' | '720p' | '1080p';
+  changeResolution: (res: '360p' | '480p' | '720p' | '1080p') => Promise<void>;
+  dwellAction: 'Delete' | 'Clear' | 'Send' | 'Space' | null;
+  dwellProgress: number;
 }
+
 
 export function useHandTracking(
   videoRef: RefObject<HTMLVideoElement | null>,
@@ -49,6 +59,8 @@ export function useHandTracking(
   const lastResultsRef = useRef<any>(null);
   const statusRef = useRef<TrackingStatus>('idle');
   const smoothedHandsRef = useRef<SmoothedPoint[][]>([]);
+  const lastDetectionTimeRef = useRef<number>(0);
+  const currentDelegateRef = useRef<'GPU' | 'CPU'>('GPU');
 
   // Recording & Prediction state
   const sequenceRef = useRef<number[][]>([]);
@@ -57,6 +69,37 @@ export function useHandTracking(
   const isPredictingRef = useRef(false);
   const frameCountRef = useRef(0);
   const predictionsRef = useRef<Prediction[]>([]);
+
+  // Gesture swipe tracking ref
+  const lastSwipeTimeRef = useRef<number>(0);
+
+  // Dwell state variables
+  const [dwellAction, setDwellAction] = useState<'Delete' | 'Clear' | 'Send' | 'Space' | null>(null);
+  const [dwellProgress, setDwellProgress] = useState<number>(0);
+
+  interface Hotzone {
+    name: 'Delete' | 'Clear' | 'Send' | 'Space';
+    x: number; // Normalized center X
+    y: number; // Normalized center Y
+    radius: number; // Normalized radius
+    progress: number; // 0 to 100
+  }
+
+  const hotzonesRef = useRef<Hotzone[]>([
+    { name: 'Delete', x: 0.25, y: 0.15, radius: 0.05, progress: 0 },
+    { name: 'Space', x: 0.41, y: 0.15, radius: 0.05, progress: 0 },
+    { name: 'Clear', x: 0.59, y: 0.15, radius: 0.05, progress: 0 },
+    { name: 'Send', x: 0.75, y: 0.15, radius: 0.05, progress: 0 }
+  ]);
+
+  const lastHoveredZoneRef = useRef<'Delete' | 'Clear' | 'Send' | 'Space' | null>(null);
+  const hoverStartRef = useRef<number | null>(null);
+  const hasTriggeredZoneRef = useRef(false);
+  const lastTickRef = useRef<number>(0);
+  const lastTriggerTimeRef = useRef<number>(0);
+  const lastTriggerTimesRef = useRef<Record<string, number>>({});
+  const missingHandFramesRef = useRef<number>(0);
+
 
   // Inertial slide & cross-fade physics refs for tracking loss
   const activeHandOpacityRef = useRef<number>(0);
@@ -71,7 +114,7 @@ export function useHandTracking(
   const [predictions, setPredictionsState] = useState<Prediction[]>([]);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
-  const [resolution, setResolution] = useState<'480p' | '720p' | '1080p'>('720p');
+  const [resolution, setResolution] = useState<'360p' | '480p' | '720p' | '1080p'>('360p');
 
   const selectedDeviceIdRef = useRef(selectedDeviceId);
   useEffect(() => {
@@ -123,6 +166,8 @@ export function useHandTracking(
     }
   }, [updateDevices]);
 
+
+
   // Final cleanup on hook unmount
   useEffect(() => {
     return () => {
@@ -149,7 +194,9 @@ export function useHandTracking(
     if (results?.landmarks) {
       for (const hand of results.landmarks) {
         for (const point of hand) {
-          landmarks.push(point.x, point.y, point.z);
+          // Mirror the X coordinate (1.0 - x) because the Python code flips the camera frame horizontally
+          // before sending it to MediaPipe, whereas JS MediaPipe processes the raw (unflipped) video frame.
+          landmarks.push(1.0 - point.x, point.y, point.z);
         }
       }
     }
@@ -190,8 +237,8 @@ export function useHandTracking(
       }
       smoothedHandsRef.current = smoothedHandsRef.current.slice(0, currentHands.length);
 
-      // Apply smoothing (set to 1.0 to disable delay/ghosting and track instantly)
-      const smoothingFactor = 1.0;
+      // Apply smoothing (balanced for high-speed instant response and micro-jitter suppression)
+      const smoothingFactor = 0.85;
       currentHands.forEach((hand: any[], handIdx: number) => {
         hand.forEach((point: any, pointIdx: number) => {
           if (smoothedHandsRef.current[handIdx]?.[pointIdx]) {
@@ -205,12 +252,12 @@ export function useHandTracking(
 
     // Map connections to finger for coloring
     const fingerBones = [
-      { connections: [[0,1],[1,2],[2,3],[3,4]],          finger: 0 },
-      { connections: [[0,5],[5,6],[6,7],[7,8]],          finger: 1 },
-      { connections: [[0,9],[9,10],[10,11],[11,12]],     finger: 2 },
-      { connections: [[0,13],[13,14],[14,15],[15,16]],   finger: 3 },
-      { connections: [[0,17],[17,18],[18,19],[19,20]],   finger: 4 },
-      { connections: [[5,9],[9,13],[13,17]],             finger: -1 },
+      { connections: [[0, 1], [1, 2], [2, 3], [3, 4]], finger: 0 },
+      { connections: [[0, 5], [5, 6], [6, 7], [7, 8]], finger: 1 },
+      { connections: [[0, 9], [9, 10], [10, 11], [11, 12]], finger: 2 },
+      { connections: [[0, 13], [13, 14], [14, 15], [15, 16]], finger: 3 },
+      { connections: [[0, 17], [17, 18], [18, 19], [19, 20]], finger: 4 },
+      { connections: [[5, 9], [9, 13], [13, 17]], finger: -1 },
     ];
 
     const fingertips = [4, 8, 12, 16, 20];
@@ -227,77 +274,62 @@ export function useHandTracking(
       [5, 9, 13, 17, 0].forEach(i => ctx.lineTo(points[i].x, points[i].y));
       ctx.closePath();
       const palmGrad = ctx.createRadialGradient(points[9].x, points[9].y, 0, points[9].x, points[9].y, 60);
-      palmGrad.addColorStop(0, 'rgba(99,179,237,0.07)');
-      palmGrad.addColorStop(1, 'rgba(99,179,237,0)');
+      palmGrad.addColorStop(0, 'rgba(0, 120, 212, 0.08)');
+      palmGrad.addColorStop(1, 'rgba(0, 120, 212, 0)');
       ctx.fillStyle = palmGrad;
       ctx.fill();
 
-      // Per-finger neon color palette
+      // Windows 11 setup bloom color palette
       const fingerColors = [
-        { solid: '#f59e0b', glow: 'rgba(245,158,11,'  },  // Thumb   — amber
-        { solid: '#06b6d4', glow: 'rgba(6,182,212,'   },  // Index   — cyan
-        { solid: '#10b981', glow: 'rgba(16,185,129,'  },  // Middle  — emerald
-        { solid: '#8b5cf6', glow: 'rgba(139,92,246,'  },  // Ring    — violet
-        { solid: '#f43f5e', glow: 'rgba(244,63,94,'   },  // Pinky   — rose
+        '#60cdff', // Thumb   — Sky Blue
+        '#0078d4', // Index   — Royal Blue
+        '#00a2ed', // Middle  — Cyan Blue
+        '#5f259f', // Ring    — Violet
+        '#7c3aed', // Pinky   — Purple
       ];
 
-      // === BONES — triple-layer glow per finger ===
+      // === BONES — single-pass optimized strokes ===
       fingerBones.forEach(({ connections, finger }) => {
-        const color = finger >= 0 ? fingerColors[finger] : { solid: '#94a3b8', glow: 'rgba(148,163,184,' };
+        const color = finger >= 0 ? fingerColors[finger] : '#94a3b8';
+        ctx.beginPath();
         connections.forEach(([start, end]) => {
-          const x1 = points[start].x, y1 = points[start].y;
-          const x2 = points[end].x,   y2 = points[end].y;
-
-          // Outer glow halo
-          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-          ctx.strokeStyle = `${color.glow}0.2)`; ctx.lineWidth = 12; ctx.lineCap = 'round'; ctx.stroke();
-
-          // Mid glow
-          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-          ctx.strokeStyle = `${color.glow}0.4)`; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.stroke();
-
-          // Bright core
-          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-          ctx.strokeStyle = color.solid; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
-          ctx.globalAlpha = 0.92; ctx.stroke(); ctx.globalAlpha = 1;
+          if (points[start] && points[end]) {
+            ctx.moveTo(points[start].x, points[start].y);
+            ctx.lineTo(points[end].x, points[end].y);
+          }
         });
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = 'round';
+        ctx.stroke();
       });
 
-      // === JOINTS — color-matched glowing dots ===
+      // === JOINTS — single-pass optimized dots ===
       hand.forEach((_, idx) => {
+        if (!points[idx]) return;
         const x = points[idx].x;
         const y = points[idx].y;
         const isTip = fingertips.includes(idx);
 
         let fingerIdx = -1;
-        if (idx >= 1  && idx <= 4)  fingerIdx = 0;
-        else if (idx >= 5  && idx <= 8)  fingerIdx = 1;
-        else if (idx >= 9  && idx <= 12) fingerIdx = 2;
+        if (idx >= 1 && idx <= 4) fingerIdx = 0;
+        else if (idx >= 5 && idx <= 8) fingerIdx = 1;
+        else if (idx >= 9 && idx <= 12) fingerIdx = 2;
         else if (idx >= 13 && idx <= 16) fingerIdx = 3;
         else if (idx >= 17 && idx <= 20) fingerIdx = 4;
 
-        const color = fingerIdx >= 0 ? fingerColors[fingerIdx] : { solid: '#94a3b8', glow: 'rgba(148,163,184,' };
+        const color = fingerIdx >= 0 ? fingerColors[fingerIdx] : '#94a3b8';
+
+        ctx.beginPath();
+        ctx.arc(x, y, isTip ? 5.5 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.fill();
 
         if (isTip) {
-          // Outer halo
-          ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI * 2);
-          ctx.fillStyle = `${color.glow}0.12)`; ctx.fill();
-          // Mid halo
-          ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2);
-          ctx.fillStyle = `${color.glow}0.3)`; ctx.fill();
-          // Core dot
-          ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = color.solid; ctx.globalAlpha = 0.95; ctx.fill(); ctx.globalAlpha = 1;
-          // White hot center
-          ctx.beginPath(); ctx.arc(x, y, 1.8, 0, Math.PI * 2);
-          ctx.fillStyle = '#ffffff'; ctx.fill();
-        } else {
-          // Subtle glow halo
-          ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2);
-          ctx.fillStyle = `${color.glow}0.18)`; ctx.fill();
-          // Core dot
-          ctx.beginPath(); ctx.arc(x, y, 2.8, 0, Math.PI * 2);
-          ctx.fillStyle = color.solid; ctx.globalAlpha = 0.85; ctx.fill(); ctx.globalAlpha = 1;
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
         }
       });
 
@@ -346,12 +378,12 @@ export function useHandTracking(
           ctx.rect(-rectW / 2, 0, rectW, rectH);
         }
         ctx.fillStyle = 'rgba(10, 10, 10, 0.9)';
-        ctx.shadowColor = '#06b6d4';
+        ctx.shadowColor = '#0078d4';
         ctx.shadowBlur = 12;
         ctx.fill();
 
-        // Cyan border
-        ctx.strokeStyle = 'rgba(6, 182, 212, 0.8)';
+        // Windows 11 Blue border
+        ctx.strokeStyle = 'rgba(0, 120, 212, 0.8)';
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.shadowBlur = 0; // reset
@@ -362,7 +394,7 @@ export function useHandTracking(
         ctx.moveTo(0, rectH);
         // Ends at the topmost point of the hand relative to handCenterX, scaled by -1
         ctx.lineTo(-(topmostPoint.x - handCenterX), topmostPoint.y - rectY);
-        ctx.strokeStyle = 'rgba(6, 182, 212, 0.5)';
+        ctx.strokeStyle = 'rgba(0, 120, 212, 0.5)';
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
         ctx.stroke();
@@ -415,6 +447,8 @@ export function useHandTracking(
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
+      // Allow browser and OS webcam handlers to fully release the device resource to prevent locks/crashes
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
@@ -434,6 +468,9 @@ export function useHandTracking(
       } else if (activeRes === '480p') {
         width = 640;
         height = 480;
+      } else if (activeRes === '360p') {
+        width = 640;
+        height = 360;
       }
 
       const videoConstraints: MediaTrackConstraints = {
@@ -458,23 +495,34 @@ export function useHandTracking(
         await videoRef.current.play();
       }
 
-      // 2. Initialize MediaPipe via NPM if not already cached
+      // 2. Initialize MediaPipe via NPM if not already cached (or delegate changed)
+      const targetDelegate = optionsRef.current?.backendDelegate || 'GPU';
+      if (handLandmarkerRef.current && currentDelegateRef.current !== targetDelegate) {
+        console.log(`Closing HandLandmarker to switch delegate from ${currentDelegateRef.current} to ${targetDelegate}`);
+        try {
+          handLandmarkerRef.current.close();
+        } catch (e) { }
+        handLandmarkerRef.current = null;
+      }
+
       if (!handLandmarkerRef.current) {
         const vision = await FilesetResolver.forVisionTasks(
           'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.33/wasm'
         );
 
+        console.log(`Creating HandLandmarker with ${targetDelegate} delegate`);
         handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-            delegate: 'GPU'
+            delegate: targetDelegate
           },
           runningMode: 'VIDEO',
-          numHands: 2,
-          minHandDetectionConfidence: 0.5,
-          minHandPresenceConfidence: 0.5,
-          minTrackingConfidence: 0.5
+          numHands: 1,
+          minHandDetectionConfidence: 0.3,
+          minHandPresenceConfidence: 0.3,
+          minTrackingConfidence: 0.3
         });
+        currentDelegateRef.current = targetDelegate;
       }
 
       // 3. Update device list now that permission is granted (to get friendly labels)
@@ -537,125 +585,177 @@ export function useHandTracking(
           canvas.height = video.videoHeight;
         }
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const now = performance.now();
+        let results = lastResultsRef.current;
+        let didProcessNewFrame = false;
 
-        let results = null;
-        if (handLandmarkerRef.current) {
-          if (video.currentTime !== lastVideoTimeRef.current) {
+        const targetFps = optionsRef.current?.trackingFps || 30;
+        const targetInterval = 1000 / targetFps; // e.g., 50ms for 20fps
+
+        if (handLandmarkerRef.current && video.currentTime !== lastVideoTimeRef.current) {
+          const elapsed = now - lastDetectionTimeRef.current;
+          // Use a small 2ms tolerance threshold to prevent minor scheduler jitter from causing dropped cycles
+          if (elapsed >= targetInterval - 2) {
             lastVideoTimeRef.current = video.currentTime;
-            results = handLandmarkerRef.current.detectForVideo(video, performance.now());
+            lastDetectionTimeRef.current = now;
+            results = handLandmarkerRef.current.detectForVideo(video, now);
             lastResultsRef.current = results;
-          } else {
-            results = lastResultsRef.current;
+            didProcessNewFrame = true;
           }
         }
 
-        const currentHandsCount = results?.landmarks?.length || 0;
-        if (handsDetectedRef.current !== currentHandsCount) {
-          handsDetectedRef.current = currentHandsCount;
-          setHandsDetected(currentHandsCount);
-        }
+        if (didProcessNewFrame) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        if (currentHandsCount > 0) {
-          // Calculate velocities and update prevPoints
-          if (velocitiesRef.current.length < smoothedHandsRef.current.length) {
-            velocitiesRef.current.push(
-              smoothedHandsRef.current[velocitiesRef.current.length].map(() => ({ x: 0, y: 0, z: 0 }))
-            );
+          const currentHandsCount = results?.landmarks?.length || 0;
+          if (handsDetectedRef.current !== currentHandsCount) {
+            handsDetectedRef.current = currentHandsCount;
+            setHandsDetected(currentHandsCount);
           }
-          velocitiesRef.current = velocitiesRef.current.slice(0, smoothedHandsRef.current.length);
 
-          smoothedHandsRef.current.forEach((hand, handIdx) => {
-            hand.forEach((point, pointIdx) => {
-              if (!velocitiesRef.current[handIdx]) {
-                velocitiesRef.current[handIdx] = Array(21).fill(null).map(() => ({ x: 0, y: 0, z: 0 }));
-              }
-              if (prevPointsRef.current?.[handIdx]?.[pointIdx]) {
-                velocitiesRef.current[handIdx][pointIdx] = {
-                  x: point.x - prevPointsRef.current[handIdx][pointIdx].x,
-                  y: point.y - prevPointsRef.current[handIdx][pointIdx].y,
-                  z: point.z - prevPointsRef.current[handIdx][pointIdx].z
-                };
-              }
-            });
-          });
+          if (currentHandsCount > 0) {
+            // Calculate velocities and update prevPoints
+            if (velocitiesRef.current.length < smoothedHandsRef.current.length) {
+              velocitiesRef.current.push(
+                smoothedHandsRef.current[velocitiesRef.current.length].map(() => ({ x: 0, y: 0, z: 0 }))
+              );
+            }
+            velocitiesRef.current = velocitiesRef.current.slice(0, smoothedHandsRef.current.length);
 
-          prevPointsRef.current = smoothedHandsRef.current.map(hand =>
-            hand.map(p => ({ x: p.x, y: p.y, z: p.z }))
-          );
-
-          // Fade in
-          activeHandOpacityRef.current = Math.min(1.0, activeHandOpacityRef.current + 0.08);
-        } else {
-          // Fade out
-          activeHandOpacityRef.current = Math.max(0.0, activeHandOpacityRef.current - 0.04);
-
-          if (activeHandOpacityRef.current > 0) {
-            // Apply drift & friction damping
             smoothedHandsRef.current.forEach((hand, handIdx) => {
               hand.forEach((point, pointIdx) => {
-                const vel = velocitiesRef.current[handIdx]?.[pointIdx];
-                if (vel) {
-                  point.x += vel.x;
-                  point.y += vel.y;
-                  point.z += vel.z;
-                  vel.x *= 0.90;
-                  vel.y *= 0.90;
-                  vel.z *= 0.90;
+                if (!velocitiesRef.current[handIdx]) {
+                  velocitiesRef.current[handIdx] = Array(21).fill(null).map(() => ({ x: 0, y: 0, z: 0 }));
+                }
+                if (prevPointsRef.current?.[handIdx]?.[pointIdx]) {
+                  velocitiesRef.current[handIdx][pointIdx] = {
+                    x: point.x - prevPointsRef.current[handIdx][pointIdx].x,
+                    y: point.y - prevPointsRef.current[handIdx][pointIdx].y,
+                    z: point.z - prevPointsRef.current[handIdx][pointIdx].z
+                  };
                 }
               });
             });
+
+            prevPointsRef.current = smoothedHandsRef.current.map(hand =>
+              hand.map(p => ({ x: p.x, y: p.y, z: p.z }))
+            );
+
+            // Fade in instantly on hand return
+            activeHandOpacityRef.current = 1.0;
           } else {
-            // Fully faded, clear state
+            // Clear hand tracking skeleton instantly when the actual hand is removed
+            activeHandOpacityRef.current = 0;
             smoothedHandsRef.current = [];
             prevPointsRef.current = [];
             velocitiesRef.current = [];
           }
-        }
 
-        if (currentHandsCount > 0 || activeHandOpacityRef.current > 0) {
-          drawHoloHand(ctx, results, canvas.width, canvas.height);
-        }
+          // Draw HUD skeleton at full animation rate (using cached results when throttled)
+          if (currentHandsCount > 0 || activeHandOpacityRef.current > 0) {
+            drawHoloHand(ctx, results, canvas.width, canvas.height);
+          }
 
-        // Recording logic (manual recording mode takes priority)
-        if (isRecordingRef.current) {
-          if (sequenceRef.current.length < MAX_FRAMES) {
-            const landmarks = extractLandmarks(results);
-            sequenceRef.current.push(landmarks);
-            setRecordingProgress(sequenceRef.current.length / MAX_FRAMES);
+          // === INTERACTIVE HOTZONES DWELL TRACKING ===
+          let hoveredZone: any = null;
+          if (smoothedHandsRef.current.length > 0) {
+            const firstHand = smoothedHandsRef.current[0];
+            const indexTip = firstHand[8]; // Index finger tip
 
-            if (sequenceRef.current.length >= MAX_FRAMES) {
-              isRecordingRef.current = false;
-              setIsRecording(false);
-              const sequence = [...sequenceRef.current];
-              sequenceRef.current = [];
-              runPrediction(sequence);
+            if (indexTip) {
+              // Target coordinates visual x is mirrored: 1 - indexTip.x
+              const fingerX = 1 - indexTip.x;
+              const fingerY = indexTip.y;
+
+              // Find if hovering over any hotzone
+              for (const zone of hotzonesRef.current) {
+                const dx = fingerX - zone.x;
+                const dy = fingerY - zone.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < zone.radius) {
+                  hoveredZone = zone;
+                  break;
+                }
+              }
             }
           }
-        } else {
-          // Auto-prediction mode (runs when hands are detected and not manually recording)
-          if (currentHandsCount > 0) {
-            const landmarks = extractLandmarks(results);
-            sequenceRef.current.push(landmarks);
-            
-            if (sequenceRef.current.length > MAX_FRAMES) {
-              sequenceRef.current.shift();
-            }
 
-            // Throttled prediction: run every 5 frames if not already predicting
-            frameCountRef.current = (frameCountRef.current || 0) + 1;
-            if (frameCountRef.current % 5 === 0 && !isPredictingRef.current) {
-              const sequenceCopy = [...sequenceRef.current];
-              isPredictingRef.current = true;
-              
-              runPrediction(sequenceCopy).finally(() => {
-                isPredictingRef.current = false;
-              });
+          if (hoveredZone) {
+            // Always show visual glow feedback immediately
+            setDwellAction(hoveredZone.name);
+            setDwellProgress(100);
+
+            if (lastHoveredZoneRef.current !== hoveredZone.name) {
+              lastHoveredZoneRef.current = hoveredZone.name;
+
+              // Use per-zone cooldown to prevent double-activations due to hand jitter,
+              // while allowing instant activations when switching between different buttons.
+              const nowTime = Date.now();
+              const lastZoneTrigger = lastTriggerTimesRef.current[hoveredZone.name] || 0;
+              if (nowTime - lastZoneTrigger > 300) {
+                lastTriggerTimesRef.current[hoveredZone.name] = nowTime;
+
+                if (hoveredZone.name === 'Delete' && options?.onDwellDelete) {
+                  options.onDwellDelete();
+                } else if (hoveredZone.name === 'Space' && options?.onDwellSpace) {
+                  options.onDwellSpace();
+                } else if (hoveredZone.name === 'Clear' && options?.onDwellClear) {
+                  options.onDwellClear();
+                } else if (hoveredZone.name === 'Send' && options?.onDwellSend) {
+                  options.onDwellSend();
+                }
+              }
             }
-          } else if (currentHandsCount === 0) {
-            // If no hand is detected, reset sequence but preserve predictions so they can be registered/added
-            if (sequenceRef.current.length > 0) {
-              sequenceRef.current = [];
+          } else {
+            // No zone hovered, reset hover state
+            if (lastHoveredZoneRef.current !== null) {
+              lastHoveredZoneRef.current = null;
+              setDwellAction(null);
+              setDwellProgress(0);
+            }
+          }
+
+          if (isRecordingRef.current) {
+            if (sequenceRef.current.length < MAX_FRAMES) {
+              const landmarks = extractLandmarks(results);
+              sequenceRef.current.push(landmarks);
+              setRecordingProgress(sequenceRef.current.length / MAX_FRAMES);
+
+              if (sequenceRef.current.length >= MAX_FRAMES) {
+                isRecordingRef.current = false;
+                setIsRecording(false);
+                const sequence = [...sequenceRef.current];
+                sequenceRef.current = [];
+                runPrediction(sequence);
+              }
+            }
+          } else {
+            // Auto-prediction mode (runs when hands are detected and not manually recording)
+            if (currentHandsCount > 0) {
+              missingHandFramesRef.current = 0; // reset grace period counter
+              const landmarks = extractLandmarks(results);
+              sequenceRef.current.push(landmarks);
+
+              if (sequenceRef.current.length > MAX_FRAMES) {
+                sequenceRef.current.shift();
+              }
+
+              // Run predictions every 12 actual camera frames (~400ms at 30fps) to prevent ML overload and GPU resource contention
+              frameCountRef.current = (frameCountRef.current || 0) + 1;
+              if (frameCountRef.current % 12 === 0 && !isPredictingRef.current) {
+                const sequenceCopy = [...sequenceRef.current];
+                isPredictingRef.current = true;
+
+                runPrediction(sequenceCopy).finally(() => {
+                  isPredictingRef.current = false;
+                });
+              }
+            } else if (currentHandsCount === 0) {
+              // Grace period: only clear sequence memory if tracking is lost continuously for 4 frames (~133ms)
+              missingHandFramesRef.current += 1;
+              if (missingHandFramesRef.current > 4 && sequenceRef.current.length > 0) {
+                sequenceRef.current = [];
+              }
             }
           }
         }
@@ -691,12 +791,21 @@ export function useHandTracking(
     setPredictions([]);
   }, []);
 
-  const changeResolution = useCallback(async (newRes: '480p' | '720p' | '1080p') => {
+  const changeResolution = useCallback(async (newRes: '360p' | '480p' | '720p' | '1080p') => {
     setResolution(newRes);
     if (statusRef.current === 'tracking' || statusRef.current === 'starting') {
       await startTracking(selectedDeviceIdRef.current, newRes);
     }
   }, [startTracking]);
+
+  // Re-initialize tracking if backendDelegate option changes dynamically while tracking
+  useEffect(() => {
+    const targetDelegate = options?.backendDelegate || 'GPU';
+    if (statusRef.current === 'tracking' && currentDelegateRef.current !== targetDelegate) {
+      console.log(`🔄 Dynamic backendDelegate swap to: ${targetDelegate}`);
+      startTracking(selectedDeviceIdRef.current, resolutionRef.current);
+    }
+  }, [options?.backendDelegate, startTracking]);
 
   return {
     status,
@@ -713,6 +822,8 @@ export function useHandTracking(
     selectedDeviceId,
     setSelectedDeviceId,
     resolution,
-    changeResolution
+    changeResolution,
+    dwellAction,
+    dwellProgress
   };
 }

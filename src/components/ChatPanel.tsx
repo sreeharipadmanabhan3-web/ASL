@@ -33,12 +33,12 @@ export function ChatPanel({ messages, onSendReceiverMessage }: ChatPanelProps) {
   };
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 bg-[#080808]">
+    <div className="flex flex-col flex-1 min-h-0 bg-transparent">
       {/* Scrollable Message List */}
       <div className="flex-1 overflow-y-auto px-5 py-6 space-y-5">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center px-6 animate-fade-in">
-            <div className="w-14 h-14 rounded-2xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-center mb-4 shadow-md">
+            <div className="w-14 h-14 rounded-2xl bg-white/[0.01] border border-white/[0.04] flex items-center justify-center mb-4 shadow-md">
               <svg className="w-6 h-6 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
@@ -64,8 +64,8 @@ export function ChatPanel({ messages, onSendReceiverMessage }: ChatPanelProps) {
                   {/* Sender Badge */}
                   {isSignerMessage && (
                     <div className="flex items-center gap-1.5 mb-1.5 ml-1">
-                      <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center border border-emerald-500/25">
-                        <span className="text-[9px] text-emerald-400 font-semibold select-none">🤟</span>
+                      <div className="w-4 h-4 rounded-full bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                       </div>
                       <span className="text-[10px] text-emerald-400/80 font-medium tracking-wide">Signer</span>
                     </div>
@@ -74,8 +74,8 @@ export function ChatPanel({ messages, onSendReceiverMessage }: ChatPanelProps) {
                   {!isSignerMessage && (
                     <div className="flex items-center justify-end gap-1.5 mb-1.5 mr-1">
                       <span className="text-[10px] text-teal-400/80 font-medium tracking-wide">You</span>
-                      <div className="w-4 h-4 rounded-full bg-teal-500/20 flex items-center justify-center border border-teal-500/25">
-                        <span className="text-[9px] text-teal-400 font-semibold select-none">👤</span>
+                      <div className="w-4 h-4 rounded-full bg-teal-500/10 flex items-center justify-center border border-teal-500/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
                       </div>
                     </div>
                   )}
@@ -110,7 +110,7 @@ export function ChatPanel({ messages, onSendReceiverMessage }: ChatPanelProps) {
       </div>
 
       {/* Input Composer Panel */}
-      <div className="p-4 border-t border-white/[0.06] bg-[#0a0a0a] flex-shrink-0">
+      <div className="p-4 border-t border-white/[0.06] bg-black/15 flex-shrink-0 backdrop-blur-md">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <input

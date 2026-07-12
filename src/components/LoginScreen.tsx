@@ -22,12 +22,12 @@ const fingerBones = [
   { connections: [[5, 9], [9, 13], [13, 17]], color: '#94a3b8', glow: 'rgba(148, 163, 184,' } // Palm base connection
 ];
 
-export function LoginScreen({ 
-  onLogin, 
-  onRegister, 
-  onGuestLogin, 
-  isLoading, 
-  error 
+export function LoginScreen({
+  onLogin,
+  onRegister,
+  onGuestLogin,
+  isLoading,
+  error
 }: LoginScreenProps) {
   const [mode, setMode] = useState<AuthMode>('login');
   const [username, setUsername] = useState('');
@@ -39,6 +39,9 @@ export function LoginScreen({
 
   // Active hand skeleton drawing style state
   const [skeletonStyle, setSkeletonStyle] = useState<SkeletonStyle>('hud');
+
+  // Background camera & landmarker tracking state
+  const [isCameraTesting, setIsCameraTesting] = useState(false);
 
   // Background camera & landmarker tracking refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -63,6 +66,8 @@ export function LoginScreen({
 
   // Background Camera Stream & MediaPipe Lifecycle
   useEffect(() => {
+    if (!isCameraTesting) return;
+
     let active = true;
 
     async function initTracking() {
@@ -71,7 +76,7 @@ export function LoginScreen({
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
         });
-        
+
         if (!active) {
           stream.getTracks().forEach(t => t.stop());
           return;
@@ -87,7 +92,7 @@ export function LoginScreen({
         const vision = await FilesetResolver.forVisionTasks(
           'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.33/wasm'
         );
-        
+
         if (!active) return;
 
         handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
@@ -233,7 +238,7 @@ export function LoginScreen({
         }
       }
     };
-  }, []);
+  }, [isCameraTesting]);
 
   // Helper to draw the hand on canvas with multiple styles
   const drawHandOnCanvas = (
@@ -522,7 +527,7 @@ export function LoginScreen({
     // 7. HUD Specific rotating radar overlays
     if (style === 'hud') {
       const t = performance.now() * 0.0018;
-      
+
       // Wrist target circle
       const wx = points[0].x * width;
       const wy = points[0].y * height;
@@ -532,7 +537,7 @@ export function LoginScreen({
       ctx.lineWidth = 0.8;
       ctx.setLineDash([2, 4]);
       ctx.stroke();
-      
+
       // Palm center target circle (J9)
       const px = points[9].x * width;
       const py = points[9].y * height;
@@ -607,39 +612,39 @@ export function LoginScreen({
   // Helper to generate simulated default waving hand joints
   const getSimulatedHand = (t: number) => {
     const points: { x: number; y: number }[] = [];
-    
+
     // Wrist base
     points.push({ x: 0.5, y: 0.85 });
-    
+
     // Thumb
     points.push({ x: 0.43, y: 0.74 });
     points.push({ x: 0.34, y: 0.67 });
     points.push({ x: 0.27, y: 0.63 });
-    points.push({ x: 0.21, y: 0.61 + Math.sin(t * 1.5) * 0.02 }); 
-    
+    points.push({ x: 0.21, y: 0.61 + Math.sin(t * 1.5) * 0.02 });
+
     // Index
     points.push({ x: 0.44, y: 0.55 });
     points.push({ x: 0.38, y: 0.43 });
     points.push({ x: 0.34, y: 0.33 });
-    points.push({ x: 0.30, y: 0.23 + Math.sin(t * 2) * 0.03 }); 
-    
+    points.push({ x: 0.30, y: 0.23 + Math.sin(t * 2) * 0.03 });
+
     // Middle
     points.push({ x: 0.5, y: 0.50 });
     points.push({ x: 0.5, y: 0.35 });
     points.push({ x: 0.5, y: 0.23 });
-    points.push({ x: 0.5, y: 0.11 + Math.sin(t * 2 + 0.5) * 0.035 }); 
-    
+    points.push({ x: 0.5, y: 0.11 + Math.sin(t * 2 + 0.5) * 0.035 });
+
     // Ring
     points.push({ x: 0.56, y: 0.54 });
     points.push({ x: 0.60, y: 0.39 });
     points.push({ x: 0.64, y: 0.27 });
-    points.push({ x: 0.68, y: 0.17 + Math.sin(t * 2 + 1.0) * 0.035 }); 
-    
+    points.push({ x: 0.68, y: 0.17 + Math.sin(t * 2 + 1.0) * 0.035 });
+
     // Pinky
     points.push({ x: 0.62, y: 0.60 });
     points.push({ x: 0.70, y: 0.51 });
     points.push({ x: 0.76, y: 0.43 });
-    points.push({ x: 0.82, y: 0.35 + Math.sin(t * 2 + 1.5) * 0.03 }); 
+    points.push({ x: 0.82, y: 0.35 + Math.sin(t * 2 + 1.5) * 0.03 });
 
     return points;
   };
@@ -683,236 +688,267 @@ export function LoginScreen({
   const displayError = localError || error;
 
   return (
-    <div className="fixed inset-0 bg-black flex flex-col lg:flex-row overflow-hidden select-none">
+    <div className="fixed inset-0 animate-bg-fluid flex items-center justify-center p-4 sm:p-6 md:p-8 select-none overflow-hidden">
 
-      {/* LEFT COLUMN: Vertical Login Panel Form (Mobile & Desktop) - Expanded to 7/12 */}
-      <div className="w-full lg:w-7/12 flex flex-col justify-center p-8 sm:p-12 md:p-16 relative z-10 overflow-y-auto">
-        <div className="w-full max-w-md mx-auto animate-fade-up">
-          {/* Header */}
-          <div className="mb-8">
-            <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest block mb-1 font-mono">PORTAL GATEWAY</span>
-            <h1 className="text-3xl font-extrabold tracking-tight text-white mb-2 leading-tight">Access Control</h1>
-            <p className="text-white/40 text-xs font-light leading-relaxed">
-              Authenticate your node credential sequence to unlock ASL Link capture translation feeds.
-            </p>
-          </div>
+      {/* Background ambient animations and tech elements */}
+      <div className="absolute inset-0 bg-grid-pattern opacity-[0.05] pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full border border-emerald-500/[0.02] animate-pulse-glow pointer-events-none" />
 
-          {/* Sliding Tabs Switcher */}
-          <div className="relative flex w-full bg-white/[0.02] p-1.5 rounded-2xl border border-white/[0.06] mb-6">
-            <div 
-              className="absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] bg-gradient-to-r from-emerald-500/20 via-teal-500/10 to-transparent border border-emerald-500/20 rounded-xl transition-all duration-300 ease-out"
-              style={{
-                left: mode === 'login' ? '6px' : 'calc(50% + 0px)'
-              }}
-            />
-            
-            <button
-              type="button"
-              onClick={() => { setMode('login'); setLocalError(''); }}
-              className={`flex-1 relative z-10 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 focus:outline-none cursor-pointer ${
-                mode === 'login' ? 'text-emerald-400' : 'text-white/40 hover:text-white/70'
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMode('register'); setLocalError(''); }}
-              className={`flex-1 relative z-10 py-2.5 text-xs font-bold uppercase tracking-wider transition-all duration-200 focus:outline-none cursor-pointer ${
-                mode === 'register' ? 'text-emerald-400' : 'text-white/40 hover:text-white/70'
-              }`}
-            >
-              Sign Up
-            </button>
-          </div>
+      {/* Ambient glass glows */}
+      <div className="absolute top-1/4 left-1/4 w-[35vw] h-[35vw] max-w-[400px] rounded-full bg-emerald-500/5 blur-[120px] animate-orb-color-1 pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 w-[30vw] h-[30vw] max-w-[350px] rounded-full bg-teal-500/5 blur-[100px] animate-orb-color-2 pointer-events-none" />
 
-          {/* Auth form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Username Input */}
-            <div className="relative group">
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/35 group-focus-within:text-emerald-400 transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
-              </div>
-              <input
-                type="text"
-                placeholder="Username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                className="w-full glass-input rounded-xl py-3.5 pl-12 pr-4 text-white text-sm placeholder-white/20 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20"
-                autoComplete="username"
-              />
+      {/* Subtle alignment lasers */}
+      <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-emerald-500/5 to-transparent pointer-events-none" />
+      <div className="absolute top-0 right-1/3 w-px h-full bg-gradient-to-b from-transparent via-teal-500/5 to-transparent pointer-events-none" />
+
+      {/* Center-aligned dual-pane glassmorphic card */}
+      <div className="relative w-full max-w-4xl min-h-[620px] md:min-h-[660px] glass-panel rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row z-10 animate-scale-in">
+
+        {/* LEFT COLUMN: Auth Form */}
+        <div className="w-full md:w-7/12 flex flex-col justify-center py-8 px-6 sm:px-8 md:py-10 md:px-10 overflow-y-auto relative z-10">
+          <div className="w-full max-w-sm mx-auto animate-fade-up">
+            {/* Header */}
+            <div className="mb-6">
+              <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest block mb-1 font-mono">PORTAL GATEWAY</span>
+              <h1 className="text-2xl font-extrabold tracking-tight text-white mb-1.5 leading-tight">Access Control</h1>
+              <p className="text-white/40 text-[11px] font-light leading-relaxed">
+                Authenticate your credentials to unlock ASL Link capture translation feeds.
+              </p>
             </div>
 
-            {/* Collapsible Fields for Registration */}
-            <div 
-              className={`overflow-hidden transition-all duration-300 ease-in-out space-y-4 ${
-                mode === 'register' ? 'max-h-64 opacity-100 visible' : 'max-h-0 opacity-0 invisible pointer-events-none'
-              }`}
-            >
-              {/* Email Address */}
-              <div className="relative group">
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/35 group-focus-within:text-emerald-400 transition-colors">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                </div>
-                <input
-                  type="email"
-                  placeholder="Email Address"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full glass-input rounded-xl py-3.5 pl-12 pr-4 text-white text-sm placeholder-white/20 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20"
-                  autoComplete="email"
-                  disabled={mode !== 'register'}
-                />
-              </div>
+            {/* Sliding Tabs Switcher */}
+            <div className="relative flex w-full bg-white/[0.01] p-1 rounded-xl border border-white/[0.05] mb-5">
+              <div
+                className="absolute top-1 bottom-1 w-[calc(50%-4px)] bg-gradient-to-r from-emerald-500/20 via-teal-500/10 to-transparent border border-emerald-500/20 rounded-lg transition-all duration-300 ease-out"
+                style={{
+                  left: mode === 'login' ? '4px' : 'calc(50% + 0px)'
+                }}
+              />
 
-              {/* Display Name Input */}
+              <button
+                type="button"
+                onClick={() => { setMode('login'); setLocalError(''); }}
+                className={`flex-1 relative z-10 py-2 text-[11px] font-bold uppercase tracking-wider transition-all duration-200 focus:outline-none cursor-pointer ${mode === 'login' ? 'text-emerald-400' : 'text-white/40 hover:text-white/70'
+                  }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMode('register'); setLocalError(''); }}
+                className={`flex-1 relative z-10 py-2 text-[11px] font-bold uppercase tracking-wider transition-all duration-200 focus:outline-none cursor-pointer ${mode === 'register' ? 'text-emerald-400' : 'text-white/40 hover:text-white/70'
+                  }`}
+              >
+                Sign Up
+              </button>
+            </div>
+
+            {/* Auth form */}
+            <form onSubmit={handleSubmit} className="space-y-3.5">
+              {/* Username Input */}
               <div className="relative group">
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/35 group-focus-within:text-emerald-400 transition-colors">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
                 </div>
                 <input
                   type="text"
-                  placeholder="Display Name (optional)"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="Username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   className="w-full glass-input rounded-xl py-3.5 pl-12 pr-4 text-white text-sm placeholder-white/20 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20"
-                  disabled={mode !== 'register'}
+                  autoComplete="username"
                 />
               </div>
-            </div>
 
-            {/* Password Input */}
-            <div className="relative group">
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/35 group-focus-within:text-emerald-400 transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-              </div>
-              <input
-                type={showPassword ? 'text' : 'password'}
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full glass-input rounded-xl py-3.5 pl-12 pr-12 text-white text-sm placeholder-white/20 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20"
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-emerald-400 focus:outline-none transition-colors cursor-pointer"
+              {/* Collapsible Fields for Registration */}
+              <div
+                className={`overflow-hidden transition-all duration-300 ease-in-out space-y-3.5 ${mode === 'register' ? 'max-h-64 opacity-100 visible' : 'max-h-0 opacity-0 invisible pointer-events-none'
+                  }`}
               >
-                {showPassword ? (
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                {/* Email Address */}
+                <div className="relative group">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/35 group-focus-within:text-emerald-400 transition-colors">
+                    <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <input
+                    type="email"
+                    placeholder="Email Address"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full glass-input rounded-xl py-3.5 pl-12 pr-4 text-white text-sm placeholder-white/20 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20"
+                    autoComplete="email"
+                    disabled={mode !== 'register'}
+                  />
+                </div>
+
+                {/* Display Name Input */}
+                <div className="relative group">
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/35 group-focus-within:text-emerald-400 transition-colors">
+                    <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Display Name (optional)"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    className="w-full glass-input rounded-xl py-3.5 pl-12 pr-4 text-white text-sm placeholder-white/20 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20"
+                    disabled={mode !== 'register'}
+                  />
+                </div>
+              </div>
+
+              {/* Password Input */}
+              <div className="relative group">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/35 group-focus-within:text-emerald-400 transition-colors">
+                  <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                   </svg>
+                </div>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full glass-input rounded-xl py-3.5 pl-12 pr-12 text-white text-sm placeholder-white/20 focus:outline-none focus:border-emerald-500/40 focus:ring-1 focus:ring-emerald-500/20"
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-emerald-400 focus:outline-none transition-colors cursor-pointer"
+                >
+                  {showPassword ? (
+                    <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+
+              {/* Error notifications */}
+              <div className={`overflow-hidden transition-all duration-300 ease-in-out ${displayError ? 'max-h-20 opacity-100 mt-2' : 'max-h-0 opacity-0 pointer-events-none'}`}>
+                <div className="flex items-center gap-2.5 p-2.5 bg-red-500/10 border border-red-500/20 rounded-xl">
+                  <svg className="w-4.5 h-4.5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-red-400 text-xs font-medium">{displayError}</span>
+                </div>
+              </div>
+
+              {/* Submit button */}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full relative overflow-hidden group bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:from-emerald-500/40 disabled:to-teal-500/40 text-black font-bold py-3.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 mt-6 active:scale-[0.98] shadow-lg shadow-emerald-500/10 hover:shadow-emerald-500/20 cursor-pointer text-xs tracking-wider uppercase"
+              >
+                {isLoading ? (
+                  <>
+                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span className="text-xs font-bold tracking-wider">{mode === 'login' ? 'SIGNING IN...' : 'REGISTERING...'}</span>
+                  </>
                 ) : (
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
+                  <span className="text-xs font-bold tracking-wider">{mode === 'login' ? 'SIGN IN' : 'CREATE ACCOUNT'}</span>
                 )}
               </button>
+            </form>
+
+            {/* Divider */}
+            <div className="flex items-center gap-4 my-6">
+              <div className="flex-1 h-px bg-white/10" />
+              <span className="text-white/20 text-xs font-light uppercase tracking-widest font-mono">OR</span>
+              <div className="flex-1 h-px bg-white/10" />
             </div>
 
-            {/* Error notifications */}
-            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${displayError ? 'max-h-20 opacity-100 mt-2' : 'max-h-0 opacity-0 pointer-events-none'}`}>
-              <div className="flex items-center gap-3 p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-                <svg className="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-red-400 text-xs font-medium">{displayError}</span>
-              </div>
-            </div>
-
-            {/* Submit button */}
+            {/* Guest Entrance */}
             <button
-              type="submit"
+              onClick={handleGuestLogin}
               disabled={isLoading}
-              className="w-full relative overflow-hidden group bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:from-emerald-500/40 disabled:to-teal-500/40 text-black font-bold py-3.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 mt-6 active:scale-[0.98] shadow-lg shadow-emerald-500/10 hover:shadow-emerald-500/20 cursor-pointer text-xs tracking-wider uppercase"
+              className="w-full bg-white/[0.02] hover:bg-white/[0.05] border border-white/10 text-white/70 hover:text-white py-3.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider active:scale-[0.98] cursor-pointer"
             >
-              {isLoading ? (
-                <>
-                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  <span className="text-xs font-bold tracking-wider">{mode === 'login' ? 'SIGNING IN...' : 'REGISTERING...'}</span>
-                </>
-              ) : (
-                <span className="text-xs font-bold tracking-wider">{mode === 'login' ? 'SIGN IN' : 'CREATE ACCOUNT'}</span>
-              )}
+              <svg className="w-4 h-4 text-white/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <span>Continue as Guest</span>
             </button>
-          </form>
 
-          {/* Divider */}
-          <div className="flex items-center gap-4 my-6">
-            <div className="flex-1 h-px bg-white/10" />
-            <span className="text-white/20 text-xs font-light uppercase tracking-widest font-mono">OR</span>
-            <div className="flex-1 h-px bg-white/10" />
-          </div>
-
-          {/* Guest Entrance */}
-          <button
-            onClick={handleGuestLogin}
-            disabled={isLoading}
-            className="w-full bg-white/[0.02] hover:bg-white/[0.05] border border-white/10 text-white/70 hover:text-white py-3.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider active:scale-[0.98] cursor-pointer"
-          >
-            <svg className="w-4 h-4 text-white/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            <span>Continue as Guest</span>
-          </button>
-
-          {/* Demo Info Banner */}
-          <div className="text-center mt-6">
-            <p className="text-white/25 text-[10px] font-mono tracking-wide uppercase">
-              Demo: <span className="text-emerald-400/80 bg-emerald-500/5 border border-emerald-500/10 px-1.5 py-0.5 rounded">admin</span> &bull; Pass: <span className="text-emerald-400/80 bg-emerald-500/5 border border-emerald-500/10 px-1.5 py-0.5 rounded">1234</span>
-            </p>
+            {/* Demo Info Banner */}
+            <div className="text-center mt-6">
+              <p className="text-white/25 text-[10px] font-mono tracking-wide uppercase">
+                Demo: <span className="text-emerald-400/80 bg-emerald-500/5 border border-emerald-500/10 px-1.5 py-0.5 rounded">admin</span> &bull; Pass: <span className="text-emerald-400/80 bg-emerald-500/5 border border-emerald-500/10 px-1.5 py-0.5 rounded">1234</span>
+              </p>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* RIGHT COLUMN: Just the Hand Skeleton Canvas - Reduced to 5/12 */}
-      <div className="hidden lg:flex lg:w-5/12 items-center justify-center relative p-12 overflow-hidden bg-transparent">
-        {/* Shifting radial scanning ring */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[550px] rounded-full border border-white/[0.02] animate-pulse-glow pointer-events-none" />
+        {/* Vertical Separation Divider inside Card */}
+        <div className="hidden md:block w-px bg-white/[0.08] relative z-10 self-stretch my-6" />
 
-        {/* Glow accent */}
-        <div className="absolute top-0 left-0 w-48 h-screen bg-gradient-to-r from-emerald-500/5 to-transparent pointer-events-none" />
+        {/* RIGHT COLUMN: Just the Hand Skeleton Canvas */}
+        <div className="hidden md:flex md:w-5/12 items-center justify-center relative p-8 overflow-hidden bg-white/[0.01]">
+          {!isCameraTesting ? (
+            <div className="flex flex-col items-center justify-center text-center p-6 relative z-10 animate-fade-in">
+              <div className="w-16 h-16 rounded-full bg-white/[0.02] border border-white/[0.08] flex items-center justify-center shadow-lg mb-4">
+                <svg className="w-6 h-6 text-white/40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                  <circle cx="12" cy="13" r="4" />
+                </svg>
+              </div>
+              <h3 className="text-white text-xs font-semibold uppercase tracking-wider mb-2">Camera Interface Standby</h3>
+              <p className="text-white/35 text-[10px] font-light leading-relaxed max-w-[200px] mb-6">
+                Optionally test your webcam tracking mapping latency before logging into the interface.
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsCameraTesting(true)}
+                className="px-4 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 text-emerald-400 font-bold text-[10px] tracking-wider rounded-xl uppercase transition-all duration-200 cursor-pointer active:scale-95 shadow-lg shadow-emerald-500/5"
+              >
+                Test Camera Tracking
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Cybernetic wireframe hand skeleton canvas */}
+              <canvas
+                ref={canvasRef}
+                width={500}
+                height={500}
+                className="w-[320px] h-[320px] drop-shadow-[0_0_20px_rgba(6,182,212,0.3)] relative z-10"
+              />
 
-        {/* Floating grid pattern background */}
-        <div className="absolute inset-0 bg-grid-pattern opacity-[0.07] pointer-events-none" />
-
-        {/* Cybernetic wireframe hand skeleton canvas */}
-        <canvas
-          ref={canvasRef}
-          width={500}
-          height={500}
-          className="w-[420px] h-[420px] drop-shadow-[0_0_20px_rgba(6,182,212,0.4)] relative z-10"
-        />
-
-        {/* Skeleton Style Selector */}
-        <div className="absolute bottom-6 right-6 flex gap-1.5 bg-black/60 border border-white/[0.08] p-1 rounded-xl z-20 backdrop-blur-md shadow-2xl">
-          {(['neon', 'mesh', 'hud', 'literal'] as const).map((style) => (
-            <button
-              key={style}
-              onClick={() => setSkeletonStyle(style)}
-              className={`px-2.5 py-1 text-[9px] font-mono font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${
-                skeletonStyle === style
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/10'
-                  : 'text-white/40 hover:text-white/70'
-              }`}
-            >
-              {style === 'neon' ? 'Neon' : style === 'mesh' ? 'Mesh' : style === 'hud' ? 'HUD' : 'Literal'}
-            </button>
-          ))}
+              {/* Skeleton Style Selector */}
+              <div className="absolute bottom-4 right-4 flex gap-1.5 bg-black/60 border border-white/[0.06] p-1 rounded-xl z-20 backdrop-blur-md shadow-2xl">
+                {(['neon', 'mesh', 'hud', 'literal'] as const).map((style) => (
+                  <button
+                    key={style}
+                    onClick={() => setSkeletonStyle(style)}
+                    className={`px-2 py-0.5 text-[8px] font-mono font-bold uppercase tracking-wider rounded-lg transition-all cursor-pointer ${skeletonStyle === style
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/10'
+                        : 'text-white/40 hover:text-white/70'
+                      }`}
+                  >
+                    {style === 'neon' ? 'Neon' : style === 'mesh' ? 'Mesh' : style === 'hud' ? 'HUD' : 'Literal'}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
+
       </div>
 
       {/* Hidden Video element for background landmark tracking */}

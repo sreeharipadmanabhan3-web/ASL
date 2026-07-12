@@ -2,17 +2,42 @@ import React, { useState } from 'react';
 import { User } from '../types';
 import { Avatar } from './Avatar';
 
+export interface PerformanceSettings {
+  backendDelegate: 'GPU' | 'CPU';
+  tfjsBackend: 'webgl' | 'cpu';
+  trackingFps: number;
+  enableCustomCursor: boolean;
+  enableAutoAdd?: boolean;
+  autoAddDuration?: number;
+}
+
 interface ProfileSettingsModalProps {
   user: User;
   onClose: () => void;
   onUpdateProfile: (displayName: string, avatarColor: string) => Promise<boolean>;
+  perfSettings: PerformanceSettings;
+  onUpdatePerfSettings: (settings: PerformanceSettings) => void;
 }
 
-export function ProfileSettingsModal({ user, onClose, onUpdateProfile }: ProfileSettingsModalProps) {
+export function ProfileSettingsModal({
+  user,
+  onClose,
+  onUpdateProfile,
+  perfSettings,
+  onUpdatePerfSettings
+}: ProfileSettingsModalProps) {
   const [displayName, setDisplayName] = useState(user.displayName || '');
   const [avatarColor, setAvatarColor] = useState(user.avatarColor || '#06b6d4');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // Performance settings local state
+  const [backendDelegate, setBackendDelegate] = useState<'GPU' | 'CPU'>(perfSettings?.backendDelegate || 'GPU');
+  const [tfjsBackend, setTfjsBackend] = useState<'webgl' | 'cpu'>(perfSettings?.tfjsBackend || 'webgl');
+  const [trackingFps, setTrackingFps] = useState<number>(perfSettings?.trackingFps || 30);
+  const [enableCustomCursor, setEnableCustomCursor] = useState<boolean>(perfSettings?.enableCustomCursor ?? false);
+  const [enableAutoAdd, setEnableAutoAdd] = useState<boolean>(perfSettings?.enableAutoAdd ?? true);
+  const [autoAddDuration, setAutoAddDuration] = useState<number>(perfSettings?.autoAddDuration ?? 1.5);
 
   const colors = [
     { name: 'Cyan', hex: '#06b6d4' },
@@ -26,10 +51,18 @@ export function ProfileSettingsModal({ user, onClose, onUpdateProfile }: Profile
     e.preventDefault();
     setIsSaving(true);
     setError('');
-    
+
     try {
       const success = await onUpdateProfile(displayName, avatarColor);
       if (success) {
+        onUpdatePerfSettings({
+          backendDelegate,
+          tfjsBackend,
+          trackingFps,
+          enableCustomCursor,
+          enableAutoAdd,
+          autoAddDuration
+        });
         onClose();
       } else {
         setError('Failed to update profile.');
@@ -45,7 +78,7 @@ export function ProfileSettingsModal({ user, onClose, onUpdateProfile }: Profile
     <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md z-[9999] animate-fade-in pointer-events-auto">
       <div className="w-full max-w-md p-6 glass-panel rounded-3xl border border-white/[0.12] shadow-2xl relative animate-scale-in">
         {/* Close Button */}
-        <button 
+        <button
           onClick={onClose}
           className="absolute top-4 right-4 text-white/40 hover:text-white hover:bg-white/[0.05] p-1.5 rounded-lg transition-colors cursor-pointer"
         >
@@ -90,16 +123,129 @@ export function ProfileSettingsModal({ user, onClose, onUpdateProfile }: Profile
                   key={c.hex}
                   type="button"
                   onClick={() => setAvatarColor(c.hex)}
-                  className={`w-7 h-7 rounded-full transition-all duration-200 border-2 active:scale-90 cursor-pointer ${
-                    avatarColor === c.hex
+                  className={`w-7 h-7 rounded-full transition-all duration-200 border-2 active:scale-90 cursor-pointer ${avatarColor === c.hex
                       ? 'border-white scale-110 shadow-[0_0_15px_rgba(255,255,255,0.4)]'
                       : 'border-transparent opacity-65 hover:opacity-100'
-                  }`}
+                    }`}
                   style={{ backgroundColor: c.hex }}
                   title={c.name}
                 />
               ))}
             </div>
+          </div>
+
+          {/* System & Performance Configurations */}
+          <div className="space-y-4 pt-2 border-t border-white/[0.06]">
+            <div>
+              <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest block mb-2 font-mono">SYSTEM & PERFORMANCE</span>
+            </div>
+
+            {/* MediaPipe & TFJS Acceleration Backends */}
+            <div className="grid grid-cols-2 gap-3.5">
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-mono font-bold text-white/40 tracking-wider block">HAND LANDMARK ENGINE</label>
+                <select
+                  value={backendDelegate}
+                  onChange={(e) => setBackendDelegate(e.target.value as 'GPU' | 'CPU')}
+                  className="w-full bg-[#0d1117] border border-white/[0.08] hover:border-white/20 transition-all rounded-xl py-2 px-3 text-white text-xs focus:outline-none cursor-pointer"
+                >
+                  <option value="GPU">GPU (Hardware)</option>
+                  <option value="CPU">CPU (Software)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[9px] font-mono font-bold text-white/40 tracking-wider block">AI INFERENCE BACKEND</label>
+                <select
+                  value={tfjsBackend}
+                  onChange={(e) => setTfjsBackend(e.target.value as 'webgl' | 'cpu')}
+                  className="w-full bg-[#0d1117] border border-white/[0.08] hover:border-white/20 transition-all rounded-xl py-2 px-3 text-white text-xs focus:outline-none cursor-pointer"
+                >
+                  <option value="webgl">GPU (WebGL)</option>
+                  <option value="cpu">CPU (Standard)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Tracking FPS Refresh Cap */}
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center">
+                <label className="text-[9px] font-mono font-bold text-white/40 tracking-wider block">LANDMARK PROCESS RATE CAP</label>
+                <span className="text-[10px] font-bold font-mono text-cyan-400">{trackingFps} FPS</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="15"
+                  max="30"
+                  step="5"
+                  value={trackingFps}
+                  onChange={(e) => setTrackingFps(parseInt(e.target.value))}
+                  className="flex-1 accent-cyan-500 h-1 rounded-lg bg-white/[0.06] cursor-pointer appearance-none"
+                />
+                <span className="text-[9px] font-mono text-white/30 w-8 text-right">
+                  {trackingFps === 30 ? 'Native' : trackingFps === 15 ? 'Eco' : 'Balanced'}
+                </span>
+              </div>
+            </div>
+
+            {/* Custom Cursor Toggle */}
+            <div className="flex items-center justify-between p-3 bg-white/[0.01] border border-white/[0.04] rounded-2xl">
+              <div>
+                <span className="text-[10px] font-bold text-white/80 block">Premium Custom Cursor</span>
+                <span className="text-[8.5px] text-white/35 block mt-0.5 leading-none">Turn off to completely eliminate cursor lag on low-power chips</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEnableCustomCursor(!enableCustomCursor)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${enableCustomCursor ? 'bg-cyan-500' : 'bg-white/[0.08]'}`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${enableCustomCursor ? 'translate-x-4' : 'translate-x-0'}`}
+                />
+              </button>
+            </div>
+
+            {/* Auto-Add on Letter Hold Toggle */}
+            <div className="flex items-center justify-between p-3 bg-white/[0.01] border border-white/[0.04] rounded-2xl">
+              <div>
+                <span className="text-[10px] font-bold text-white/80 block">Auto-Add on Letter Hold</span>
+                <span className="text-[8.5px] text-white/35 block mt-0.5 leading-none">Automatically append the recognized letter to the sentence bar if you hold the sign continuously</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEnableAutoAdd(!enableAutoAdd)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${enableAutoAdd ? 'bg-emerald-500' : 'bg-white/[0.08]'}`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${enableAutoAdd ? 'translate-x-4' : 'translate-x-0'}`}
+                />
+              </button>
+            </div>
+
+            {/* Auto-Add Hold Duration Slider */}
+            {enableAutoAdd && (
+              <div className="space-y-1.5 p-3 bg-white/[0.01] border border-white/[0.04] rounded-2xl animate-fade-in">
+                <div className="flex justify-between items-center">
+                  <label className="text-[9px] font-mono font-bold text-white/40 tracking-wider block">HOLD DURATION</label>
+                  <span className="text-[10px] font-bold font-mono text-emerald-400">{autoAddDuration.toFixed(1)}s</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="1.0"
+                    max="3.0"
+                    step="0.5"
+                    value={autoAddDuration}
+                    onChange={(e) => setAutoAddDuration(parseFloat(e.target.value))}
+                    className="flex-1 accent-emerald-500 h-1 rounded-lg bg-white/[0.06] cursor-pointer appearance-none"
+                  />
+                  <span className="text-[9px] font-mono text-white/30 w-8 text-right">
+                    {autoAddDuration <= 1.0 ? 'Fast' : autoAddDuration >= 2.5 ? 'Slow' : 'Balanced'}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* System Statistics */}

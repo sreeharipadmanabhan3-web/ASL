@@ -8,9 +8,6 @@ import { VocabularyPanel } from './VocabularyPanel';
 import { RecordingControls } from './RecordingControls';
 import { SentenceBar } from './SentenceBar';
 import { ChatPanel } from './ChatPanel';
-import { PerformanceSettings } from './ProfileSettingsModal';
-import { PredictionOverlay } from './PredictionOverlay';
-import { audioEffects } from '../utils/audioEffects';
 
 interface MainAppProps {
   user: User;
@@ -18,36 +15,9 @@ interface MainAppProps {
   onNavigateHome: () => void;
   onRefreshUser?: () => void;
   onOpenSettings?: () => void;
-  perfSettings: PerformanceSettings;
 }
 
-const formatSentenceArray = (words: string[]): string => {
-  if (words.length === 0) return '';
-  let result = '';
-  for (let i = 0; i < words.length; i++) {
-    const current = words[i];
-    const prev = i > 0 ? words[i - 1] : null;
-
-    if (current === ' ') {
-      if (result.length > 0 && !result.endsWith(' ')) {
-        result += ' ';
-      }
-      continue;
-    }
-
-    if (prev !== null && prev !== ' ') {
-      if (prev.length > 1 || current.length > 1) {
-        if (!result.endsWith(' ')) {
-          result += ' ';
-        }
-      }
-    }
-    result += current;
-  }
-  return result;
-};
-
-export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSettings }: MainAppProps) {
+export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings }: MainAppProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [sentence, setSentence] = useState<string[]>([]);
@@ -105,19 +75,13 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
     error: mlError,
     predict: mlPredict,
     vocabulary: mlVocabulary
-  } = useMLModel('/model/model.json', perfSettings?.tfjsBackend || 'webgl');
+  } = useMLModel('/model/model.json');
 
   // Stable options ref — prevents recreating startTracking on every render
   const mlPredictRef = useRef(mlPredict);
   useEffect(() => { mlPredictRef.current = mlPredict; }, [mlPredict]);
   const mlLoadedRef = useRef(mlLoaded);
   useEffect(() => { mlLoadedRef.current = mlLoaded; }, [mlLoaded]);
-
-  // Hotzone callbacks refs to prevent TDZ & circular dependency
-  const deleteLastWordRef = useRef<() => void>(() => { });
-  const resetSentenceRef = useRef<() => void>(() => { });
-  const sendSentenceRef = useRef<() => void>(() => { });
-  const insertSpaceRef = useRef<() => void>(() => { });
 
   const stableOptions = useMemo(() => ({
     onPredict: async (landmarks: number[][]) => {
@@ -127,27 +91,10 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
       return [];
     },
     onRegisterWord: (word: string) => {
-      const lowerWord = word.toLowerCase();
-      if (lowerWord === 'pointer' || lowerWord === 'navigation') return;
       setSentence(prev => [...prev, word]);
-      audioEffects.playLetterAdded();
     },
-    isModelLoaded: mlLoaded,
-    backendDelegate: perfSettings?.backendDelegate || 'GPU',
-    trackingFps: perfSettings?.trackingFps || 30,
-    onDwellDelete: () => {
-      deleteLastWordRef.current();
-    },
-    onDwellClear: () => {
-      resetSentenceRef.current();
-    },
-    onDwellSend: () => {
-      sendSentenceRef.current();
-    },
-    onDwellSpace: () => {
-      insertSpaceRef.current();
-    }
-  }), [mlLoaded, perfSettings]);
+    isModelLoaded: mlLoaded
+  }), [mlLoaded]);
 
   const {
     status,
@@ -164,9 +111,7 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
     selectedDeviceId,
     setSelectedDeviceId,
     resolution,
-    changeResolution,
-    dwellAction,
-    dwellProgress
+    changeResolution
   } = useHandTracking(videoRef, canvasRef, stableOptions);
 
   const handleCameraChange = useCallback(async (deviceId: string) => {
@@ -190,72 +135,6 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
     sendReceiverMessage,
     clearMessages,
   } = useChat();
-
-  // 3-Second Letter Hold (Dwell-Time) Trigger
-  const [holdingLetter, setHoldingLetter] = useState<string | null>(null);
-  const [holdProgress, setHoldProgress] = useState(0); // 0 to 100
-  const holdStartTimeRef = useRef<number | null>(null);
-  const hasTriggeredRef = useRef(false);
-
-  // Keep track of the letter being held based on predictions
-  useEffect(() => {
-    if (perfSettings?.enableAutoAdd !== false && handsDetected > 0 && predictions.length > 0) {
-      const topPred = predictions[0];
-      const lowerWord = topPred.word.toLowerCase();
-      const isBannedWord = lowerWord === 'pointer' || lowerWord === 'navigation';
-      const isValidGesture = topPred.word !== 'Gesture Not Found' && !isBannedWord && topPred.confidence > 0.65;
-
-      if (isValidGesture) {
-        if (holdingLetter !== topPred.word) {
-          // Start tracking new letter hold
-          setHoldingLetter(topPred.word);
-          setHoldProgress(0);
-          holdStartTimeRef.current = Date.now();
-          hasTriggeredRef.current = false;
-        }
-      } else {
-        // Low confidence or neutral gesture resets hold
-        setHoldingLetter(null);
-        setHoldProgress(0);
-        holdStartTimeRef.current = null;
-        hasTriggeredRef.current = false;
-      }
-    } else {
-      // No hands detected or predictions empty resets hold
-      setHoldingLetter(null);
-      setHoldProgress(0);
-      holdStartTimeRef.current = null;
-      hasTriggeredRef.current = false;
-    }
-  }, [predictions, handsDetected, holdingLetter, perfSettings?.enableAutoAdd]);
-
-  // Effect to update hold progress smoothly and trigger auto-add
-  useEffect(() => {
-    if (!holdingLetter || !holdStartTimeRef.current || hasTriggeredRef.current) {
-      return;
-    }
-
-    const targetDuration = (perfSettings?.autoAddDuration ?? 1.5) * 1000;
-
-    const interval = setInterval(() => {
-      const startTime = holdStartTimeRef.current;
-      if (!startTime) return;
-
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(100, (elapsed / targetDuration) * 100);
-      setHoldProgress(progress);
-
-      if (elapsed >= targetDuration) {
-        setSentence(prev => [...prev, holdingLetter]);
-        hasTriggeredRef.current = true;
-        setHoldProgress(100);
-        audioEffects.playLetterAdded();
-        clearInterval(interval);
-      }
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [holdingLetter, perfSettings?.autoAddDuration]);
 
   // Use refs so the effect never re-runs due to function identity changes
   const startTrackingRef = useRef(startTracking);
@@ -300,63 +179,25 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
 
   const addWordToSentence = useCallback(() => {
     if (predictions.length > 0 && predictions[0].word !== 'Gesture Not Found') {
-      const word = predictions[0].word;
-      const lowerWord = word.toLowerCase();
-      if (lowerWord === 'pointer' || lowerWord === 'navigation') return;
-      setSentence(prev => [...prev, word]);
-      audioEffects.playLetterAdded();
+      setSentence(prev => [...prev, predictions[0].word]);
     }
   }, [predictions]);
 
-  const deleteLastWord = useCallback(() => {
-    setSentence(prev => {
-      if (prev.length === 0) return prev;
-      return prev.slice(0, -1);
-    });
-    audioEffects.playDelete();
-  }, []);
-
-  const insertSpace = useCallback(() => {
-    setSentence(prev => {
-      if (prev.length === 0) return prev;
-      if (prev[prev.length - 1] === ' ') return prev;
-      return [...prev, ' '];
-    });
-    audioEffects.playLetterAdded();
-  }, []);
-
   const resetSentence = useCallback(() => {
     setSentence([]);
-    audioEffects.playClear();
   }, []);
 
   const sendSentence = useCallback(() => {
     if (sentence.length > 0) {
-      const formatted = formatSentenceArray(sentence);
-      if (formatted.trim().length > 0) {
-        sendSignerMessage(formatted);
-      }
+      sendSignerMessage(sentence.join(' '));
       setSentence([]);
-      audioEffects.playSend();
     }
   }, [sentence, sendSignerMessage]);
-
-  // Assign callback refs to avoid circular TDZ issues
-  deleteLastWordRef.current = deleteLastWord;
-  resetSentenceRef.current = resetSentence;
-  sendSentenceRef.current = sendSentence;
-  insertSpaceRef.current = insertSpace;
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-
-      if (e.key === ' ' || e.code === 'Space') {
-        e.preventDefault(); // prevent scrolling the page
-        insertSpace();
         return;
       }
 
@@ -376,10 +217,6 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
         case 's':
           sendSentence();
           break;
-        case 'backspace':
-        case 'd':
-          deleteLastWord();
-          break;
         case 't':
           setChatExpanded(prev => !prev);
           break;
@@ -388,7 +225,7 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [startRecording, clearRecording, addWordToSentence, resetSentence, sendSentence, deleteLastWord, insertSpace]);
+  }, [startRecording, clearRecording, addWordToSentence, resetSentence, sendSentence]);
 
   return (
     <div className="w-screen h-dvh min-h-dvh animate-bg-fluid flex p-4 gap-4 overflow-hidden select-none animate-fade-in relative">
@@ -396,6 +233,10 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
       {/* Background ambient animations and tech elements */}
       <div className="absolute inset-0 bg-grid-pattern opacity-[0.05] pointer-events-none z-0" />
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full border border-emerald-500/[0.02] animate-pulse-glow pointer-events-none z-0" />
+
+      {/* Ambient glass glows */}
+      <div className="absolute top-1/4 left-1/4 w-[35vw] h-[35vw] max-w-[400px] rounded-full bg-emerald-500/5 blur-[120px] animate-orb-color-1 pointer-events-none z-0" />
+      <div className="absolute bottom-1/4 right-1/4 w-[30vw] h-[30vw] max-w-[350px] rounded-full bg-teal-500/5 blur-[100px] animate-orb-color-2 pointer-events-none z-0" />
 
       {/* Subtle alignment lasers */}
       <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-emerald-500/5 to-transparent pointer-events-none z-0" />
@@ -436,128 +277,10 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
                 style={{ transform: mirrorVideo ? 'scaleX(-1)' : 'scaleX(1)' }}
               />
 
-              {/* Prediction HUD overlay */}
-              <PredictionOverlay
-                predictions={predictions}
-                isRecording={isRecording}
-                recordingProgress={recordingProgress}
-                holdingLetter={holdingLetter}
-                holdProgress={holdProgress}
-                autoAddDuration={perfSettings?.autoAddDuration}
-              />              {/* Floating Dwell Hotzone Buttons */}
-              {isTracking && (
-                <div className="absolute inset-0 pointer-events-none z-20 animate-fade-in">
-                  {/* Delete Button */}
-                  <div
-                    style={{ left: '25%' }}
-                    className={`absolute top-6 -translate-x-1/2 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border transition-all duration-300 backdrop-blur-xl pointer-events-auto ${dwellAction === 'Delete'
-                        ? 'bg-amber-500/10 border-amber-500/35 shadow-[0_0_20px_rgba(245,158,11,0.25)] scale-110'
-                        : 'bg-black/60 border-white/[0.06] hover:bg-black/85'
-                      }`}
-                  >
-                    {dwellAction === 'Delete' && (
-                      <svg className="absolute inset-0 w-full h-full -rotate-90">
-                        <circle
-                          cx="28"
-                          cy="28"
-                          r="25"
-                          className="stroke-amber-500 fill-none"
-                          strokeWidth="2.5"
-                          strokeDasharray={157}
-                          strokeDashoffset={157 - (157 * dwellProgress) / 100}
-                        />
-                      </svg>
-                    )}
-                    <svg className={`w-4 h-4 transition-colors ${dwellAction === 'Delete' ? 'text-amber-400' : 'text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9.75L14.25 12m0 0l2.25 2.25M14.25 12l2.25-2.25M14.25 12L12 14.25m-2.58 4.92l-6.375-6.375a1.125 1.125 0 010-1.59L9.42 4.83c.211-.211.498-.33.796-.33H19.5a2.25 2.25 0 012.25 2.25v10.5a2.25 2.25 0 01-2.25 2.25h-9.284c-.298 0-.585-.119-.796-.33z" />
-                    </svg>
-                    <span className="text-[7.5px] font-bold font-mono tracking-wider text-white/30 mt-1 uppercase">DELETE</span>
-                  </div>
-
-                  {/* Space Button */}
-                  <div
-                    style={{ left: '41%' }}
-                    className={`absolute top-6 -translate-x-1/2 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border transition-all duration-300 backdrop-blur-xl pointer-events-auto ${dwellAction === 'Space'
-                        ? 'bg-blue-500/10 border-blue-500/35 shadow-[0_0_20px_rgba(59,130,246,0.25)] scale-110'
-                        : 'bg-black/60 border-white/[0.06] hover:bg-black/85'
-                      }`}
-                  >
-                    {dwellAction === 'Space' && (
-                      <svg className="absolute inset-0 w-full h-full -rotate-90">
-                        <circle
-                          cx="28"
-                          cy="28"
-                          r="25"
-                          className="stroke-blue-500 fill-none"
-                          strokeWidth="2.5"
-                          strokeDasharray={157}
-                          strokeDashoffset={157 - (157 * dwellProgress) / 100}
-                        />
-                      </svg>
-                    )}
-                    <svg className={`w-4 h-4 transition-colors ${dwellAction === 'Space' ? 'text-blue-400' : 'text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 10v4a1 1 0 001 1h16a1 1 0 001-1v-4" />
-                    </svg>
-                    <span className="text-[7.5px] font-bold font-mono tracking-wider text-white/30 mt-1 uppercase">SPACE</span>
-                  </div>
-
-                  {/* Clear Button */}
-                  <div
-                    style={{ left: '59%' }}
-                    className={`absolute top-6 -translate-x-1/2 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border transition-all duration-300 backdrop-blur-xl pointer-events-auto ${dwellAction === 'Clear'
-                        ? 'bg-rose-500/10 border-rose-500/35 shadow-[0_0_20px_rgba(244,63,94,0.25)] scale-110'
-                        : 'bg-black/60 border-white/[0.06] hover:bg-black/85'
-                      }`}
-                  >
-                    {dwellAction === 'Clear' && (
-                      <svg className="absolute inset-0 w-full h-full -rotate-90">
-                        <circle
-                          cx="28"
-                          cy="28"
-                          r="25"
-                          className="stroke-rose-500 fill-none"
-                          strokeWidth="2.5"
-                          strokeDasharray={157}
-                          strokeDashoffset={157 - (157 * dwellProgress) / 100}
-                        />
-                      </svg>
-                    )}
-                    <svg className={`w-4 h-4 transition-colors ${dwellAction === 'Clear' ? 'text-rose-400' : 'text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                    </svg>
-                    <span className="text-[7.5px] font-bold font-mono tracking-wider text-white/30 mt-1 uppercase">CLEAR</span>
-                  </div>
-
-                  {/* Send Button */}
-                  <div
-                    style={{ left: '75%' }}
-                    className={`absolute top-6 -translate-x-1/2 flex flex-col items-center justify-center w-14 h-14 rounded-2xl border transition-all duration-300 backdrop-blur-xl pointer-events-auto ${dwellAction === 'Send'
-                        ? 'bg-emerald-500/10 border-emerald-500/35 shadow-[0_0_20px_rgba(16,185,129,0.25)] scale-110'
-                        : 'bg-black/60 border-white/[0.06] hover:bg-black/85'
-                      }`}
-                  >
-                    {dwellAction === 'Send' && (
-                      <svg className="absolute inset-0 w-full h-full -rotate-90">
-                        <circle
-                          cx="28"
-                          cy="28"
-                          r="25"
-                          className="stroke-emerald-500 fill-none"
-                          strokeWidth="2.5"
-                          strokeDasharray={157}
-                          strokeDashoffset={157 - (157 * dwellProgress) / 100}
-                        />
-                      </svg>
-                    )}
-                    <svg className={`w-4 h-4 transition-colors ${dwellAction === 'Send' ? 'text-emerald-400' : 'text-white/60'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-                    </svg>
-                    <span className="text-[7.5px] font-bold font-mono tracking-wider text-white/30 mt-1 uppercase">SEND</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Paused Stream Overlay Banner */}
+              {/* Windows 11 Setup Color Gradient Tint Overlay */}
+              <div 
+                className="absolute inset-0 pointer-events-none z-12 mix-blend-color opacity-30 bg-gradient-to-br from-[#0078d4] to-[#5f259f]"
+              />              {/* Paused Stream Overlay Banner */}
               {isPaused && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-md z-15 animate-fade-in pointer-events-auto">
                   <div className="text-center p-6 glass-panel rounded-2xl shadow-2xl">
@@ -687,7 +410,6 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
                   <SentenceBar
                     words={sentence}
                     onSend={sendSentence}
-                    onAddSpace={insertSpace}
                   />
                 </div>
               )}
@@ -819,7 +541,7 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
 
                     {showResolutionDropdown && (
                       <div className="absolute bottom-full left-0 mb-2 w-32 rounded-xl bg-black/80 backdrop-blur-md border border-white/10 shadow-2xl p-1.5 flex flex-col gap-1 z-40 animate-scale-in">
-                        {(['360p', '480p', '720p', '1080p'] as const).map((res) => (
+                        {(['480p', '720p', '1080p'] as const).map((res) => (
                           <button
                             key={res}
                             onClick={() => {
@@ -833,7 +555,7 @@ export function MainApp({ user, onLogout, onNavigateHome, onOpenSettings, perfSe
                           >
                             <span>{res.toUpperCase()}</span>
                             <span className="text-[9px] text-white/30">
-                              {res === '360p' ? 'LD' : res === '480p' ? 'VGA' : res === '720p' ? 'HD' : 'FHD'}
+                              {res === '480p' ? 'VGA' : res === '720p' ? 'HD' : 'FHD'}
                             </span>
                           </button>
                         ))}
